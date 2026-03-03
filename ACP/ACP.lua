@@ -1,4 +1,4 @@
-﻿--==============
+--==============
 -- Global Variables
 --==============
 ACP = {}
@@ -8,23 +8,33 @@ ACP_LINEHEIGHT = 16
 ACP.CheckEvents = 0
 
 
+ACP.TAGS = {
+    PART_OF = "X-Part-Of",
+    INTERFACE_MIN = "X-Min-Interface",
+    INTERFACE_MIN_ORG = "X-Since-Interface",
+    INTERFACE_MAX = "X-Max-Interface",
+    INTERFACE_MAX_ORG = "X-Compatible-With",
+}
+
 -- Handle various annoying special case names
 function ACP:SpecialCaseName(name)
-	local partof = GetAddOnMetadata(name, "X-Part-Of")
+	local partof = GetAddOnMetadata(name, ACP.TAGS.PART_OF)
 
 	if partof ~= nil then
 		return partof.."_"..name
 	end
 
-	if name == "DBM-Core" then 	
+	if name == "DBM-Core" then
 		return "DBM"
 	elseif name:match("DBM%-") then
 		return name:gsub("DBM%-", "DBM_")
 	elseif name:match("CT_") then
 		return name:gsub("CT_", "CT-")
-	elseif name:sub(1,1) == "+" or name:sub(1,1) == "!" then
+	elseif name:sub(1,1) == "+" or name:sub(1,1) == "!" or name:sub(1,1) == "_" then
 		return name:sub(2,-1)
---	elseif name == "Auc-Advanced" then 
+	elseif name == "ShadowedUF_Options" then
+	    return "ShadowedUnitFrames_Options"
+--	elseif name == "Auc-Advanced" then
 --		return "Auc"
 --	elseif name:match("Auc%-") then
 --		return name:gsub("Auc%-", "Auc_")
@@ -225,8 +235,50 @@ end
 local reasons = {}
 
 local function getreason(r)
-	if not reasons[r] then reasons[r] = TEXT(getglobal("ADDON_"..r)) end
+	if not reasons[r] then reasons[r] = _G["ADDON_"..r] end
 	return reasons[r]
+end
+
+function ACP:IsAddonCompatibleWithCurrentIntefaceVersion(addon)
+    local build = select(4, GetBuildInfo())
+
+	local addonnum = tonumber(addon)
+	if not addonnum or (addonnum and (addonnum == 0 or addonnum > GetNumAddOns())) then
+		return true -- Get to the choppa!
+	end
+
+    local max_supported =  GetAddOnMetadata(addonnum, ACP.TAGS.INTERFACE_MAX) or
+                            GetAddOnMetadata(addonnum, ACP.TAGS.INTERFACE_MAX_ORG)
+
+    local min_supported = GetAddOnMetadata(addonnum, ACP.TAGS.INTERFACE_MIN) or
+                                GetAddOnMetadata(addonnum, ACP.TAGS.INTERFACE_MIN_ORG)
+
+    --print("Min: "..tostring(min_supported).."  Max: "..tostring(max_supported))
+
+    if max_supported then
+		max_supported = tonumber(max_supported) and (tonumber(max_supported) >= build) or false
+	end
+
+    if min_supported then
+        min_supported = tonumber(min_supported) and (tonumber(min_supported) <= build) or false
+    end
+
+    return max_supported, min_supported
+
+end
+
+function ACP:GetAddonCompatibilitySummary(addon)
+    local high, low = self:IsAddonCompatibleWithCurrentIntefaceVersion(addon)
+
+    if low == false then
+		return false
+    elseif high == false then
+		return false
+	elseif high or low then
+		return true
+	end
+
+    return nil -- Compatibility not specified
 end
 
 function ACP:GetAddonStatus(addon)
@@ -237,6 +289,15 @@ function ACP:GetAddonStatus(addon)
 	if addonnum and (addonnum == 0 or addonnum > GetNumAddOns()) then
 		return -- Get to the choppa!
 	end
+
+	local high, low = self:IsAddonCompatibleWithCurrentIntefaceVersion(addon)
+    if (low == false) then
+        return "FF0000", getreason("INCOMPATIBLE")
+    end
+    if (high == false) then
+        return "FF0000", getreason("INTERFACE_VERSION")
+    end
+
 
 	local name, title, notes, enabled, loadable, reason, security = GetAddOnInfo(addon)
 
@@ -318,12 +379,13 @@ local ACP_BLIZZARD_ADDONS = {
 	"Blizzard_TradeSkillUI",
 	"Blizzard_TrainerUI",
 }
+local NUM_BLIZZARD_ADDONS = #ACP_BLIZZARD_ADDONS
 ACP.ACP_BLIZZARD_ADDONS = ACP_BLIZZARD_ADDONS
 local enabledList -- Used to prevent recursive loop in EnableAddon.
 
 local function ParseVersion(version)
 	if type(version) == "string" then
-		version = version:gsub("@project%-revision@", "DEBUG"):trim()
+		version = version:gsub("@project%-version@", CLR:Colorize("ffa0a0", "DEBUG")):trim()
 	end
 	return version
 end
@@ -350,7 +412,7 @@ local function GetAddonIndex(addon, noerr)
 		    if addon == "" then return nil end
 			for i=1, GetNumAddOns() do
 				local name = ACP:SpecialCaseName(GetAddOnInfo(i))
-				if name:lower() == addon:lower() then
+				if name:lower() ==  ACP:SpecialCaseName(addon):lower() then
 					return i
 				end
 			end
@@ -374,7 +436,7 @@ function ACP:ToggleRecursion(val)
     end
 
     local frame = _G[ACP_FRAME_NAME.."_NoRecurse"]
- 
+
 --    ACP:Print(L["Recursive Enable is now %s"]:format(CLR:Bool(not savedVar.NoRecurse, tostring(not savedVar.NoRecurse))))
 end
 
@@ -394,8 +456,7 @@ function ACP:OnLoad(this)
 	_G[ACP_FRAME_NAME.."EnableAll"]:SetText(L["Enable All"])
 	_G[ACP_FRAME_NAME.."SetButton"]:SetText(L["Sets"])
 	_G[ACP_FRAME_NAME.."_ReloadUI"]:SetText(L["ReloadUI"])
-
-
+    _G[ACP_FRAME_NAME.."BottomClose"]:SetText(L["Close"])
 
 	UIPanelWindows[ACP_FRAME_NAME] = { area = "center", pushable = 0, whileDead = 1 }
 	StaticPopupDialogs["ACP_RELOADUI"] = {
@@ -466,7 +527,7 @@ function ACP:OnLoad(this)
         else
             popup = this:GetParent()
         end
-		local text = getglobal(popup:GetName().."EditBox"):GetText()
+		local text = _G[popup:GetName().."EditBox"]:GetText()
 		if text == "" then
 			text = nil
 		end
@@ -508,7 +569,7 @@ function ACP:OnLoad(this)
 	local version = GetAddOnMetadata(ACP_ADDON_NAME, "Version")
 	if version then
 		version = ParseVersion(version)
-		title = title.." "..version
+		title = title.." ("..version..")"
 	end
 	ACP_AddonListHeaderTitle:SetText(title)
 	this:RegisterEvent("VARIABLES_LOADED")
@@ -571,13 +632,14 @@ function ACP:OnEvent(this, event, arg1, arg2, arg3)
         local reloadRequired = false
     	for k,v in pairs(savedVar.ProtectedAddons) do
     	    local name, title, notes, enabled, loadable, reason, security = GetAddOnInfo(k)
+    	    
     	    if reason == 'MISSING' then
     	    	savedVar.ProtectedAddons[k] = nil
-    	    elseif (not enabled) or enabled == 0 then 
-    	    	EnableAddOn(k) 
-    	    	reloadRequired=true 
+    	    elseif (not enabled) or enabled == 0 then
+    	    	EnableAddOn(k)
+    	    	reloadRequired=true
     	    end
-    	  
+
         end
 
         if reloadRequired then
@@ -688,7 +750,7 @@ addonListBuilders[DEFAULT] = function()
 	for i=1, numAddons do
 		table.insert(masterAddonList, i)
 	end
-	for i=1, #ACP_BLIZZARD_ADDONS do
+	for i=1, NUM_BLIZZARD_ADDONS do
 		table.insert(masterAddonList, numAddons+i)
 	end
 end
@@ -710,7 +772,7 @@ addonListBuilders[TITLES] = function()
 		return formattitle(nameA) < formattitle(nameB)
 	end )
 
-	for i=1, #ACP_BLIZZARD_ADDONS do
+	for i=1, NUM_BLIZZARD_ADDONS do
 		table.insert(masterAddonList, numAddons+i)
 	end
 end
@@ -752,7 +814,7 @@ addonListBuilders[ACE2] = function()
 
 	table.insert(t, "Blizzard")
 
-	for i=1, #ACP_BLIZZARD_ADDONS do
+	for i=1, NUM_BLIZZARD_ADDONS do
 		table.insert(t, numAddons+i)
 	end
 
@@ -813,7 +875,7 @@ addonListBuilders[AUTHOR] = function()
 
 	table.insert(t, "Blizzard")
 
-	for i=1, #ACP_BLIZZARD_ADDONS do
+	for i=1, NUM_BLIZZARD_ADDONS do
 		table.insert(t, numAddons+i)
 	end
 
@@ -861,7 +923,7 @@ addonListBuilders["Ace2 Libs And Packages"] = function()
 	for i=1, numAddons do
 		table.insert(masterAddonList, i)
 	end
-	for i=1, #ACP_BLIZZARD_ADDONS do
+	for i=1, NUM_BLIZZARD_ADDONS do
 		table.insert(masterAddonList, numAddons+i)
 	end
 end
@@ -891,7 +953,7 @@ addonListBuilders[SEPARATE_LOD_LIST] = function()
 		end
 	end
 
-	for i=1, #ACP_BLIZZARD_ADDONS do
+	for i=1, NUM_BLIZZARD_ADDONS do
 		table.insert(blizz, numAddons+i)
 	end
 
@@ -919,16 +981,16 @@ addonListBuilders[GROUP_BY_NAME] = function()
 		local nameB = GetAddOnInfo(b)
 
 		local catA, catB
-		
+
 		nameA, nameB =  ACP:SpecialCaseName(nameA),  ACP:SpecialCaseName(nameB)
-			
-		if nameA:find("_") then 
+
+		if nameA:find("_") then
 			catA, nameA  = strsplit("_", nameA)
 		else
 			catA, nameA  = nameA
 		end
-		
-		if nameB:find("_") then 
+
+		if nameB:find("_") then
 			catB, nameB  = strsplit("_", nameB)
 		else
 			catB, nameB  = nameB
@@ -940,6 +1002,8 @@ addonListBuilders[GROUP_BY_NAME] = function()
 			return tostring(catA):lower() < tostring(catB):lower()
 		end
 	end )
+
+
 
 	-- Insert the category titles into the list.
 	local prevCategory = ""
@@ -973,7 +1037,7 @@ addonListBuilders[GROUP_BY_NAME] = function()
     local blizz = {}
     blizz.category = "Blizzard Addons"
 
-	for i=1, #ACP_BLIZZARD_ADDONS do
+	for i=1, NUM_BLIZZARD_ADDONS do
 		table.insert(blizz, numAddons+i)
 	end
 
@@ -990,14 +1054,21 @@ addonListBuilders[GROUP_BY_NAME] = function()
 		    else
     			local t = {}
     			t.category = addon
-    			table.remove(currPos, #currPos)
-    			table.insert(list, t)
-    			currPos = t
+--    			table.remove(currPos, #currPos)
+                local addonpos = currPos[#currPos]
+                if addonpos then
+                    local addonname =  ACP:SpecialCaseName(GetAddOnInfo(addonpos))
+                    if (addonname == addon) then table.remove(currPos,#currPos) end
+        			table.insert(list, t)
+        			currPos = t
+        		end
     		end
 		else
    			table.insert(currPos, addon)
 		end
 	end
+
+
 
 	table.insert(masterAddonList, libs)
     table.insert(masterAddonList, blizz)
@@ -1039,10 +1110,25 @@ function ACP:ReloadAddonList()
 
 
 	ACP_AddonListSortDropDownText:SetText(builder)
-	local button = getglobal(ACP_FRAME_NAME.."SortDropDown")
+	local button = _G[ACP_FRAME_NAME.."SortDropDown"]
 	UIDropDownMenu_SetSelectedValue( button, builder)
 
 end
+
+--function ACP:OnKeyDown(this, key)
+--   -- print(this, key)
+--	if ( key == "ESCAPE" ) then
+--		HideUIPanel(ACP_AddonList);
+--	elseif ( key == "PRINTSCREEN" ) then
+--		Screenshot();
+--	elseif ( key == "PAGEUP" ) then
+--		ScrollFrameTemplate_OnMouseWheel(ACP_AddonList_ScrollFrame, 1)
+--	elseif ( key == "PAGEDOWN" ) then
+--		ScrollFrameTemplate_OnMouseWheel(ACP_AddonList_ScrollFrame, -1)
+--	end
+--end
+
+
 
 --
 -- Shift will invert the use of recursion
@@ -1196,7 +1282,7 @@ end
 
 function ACP:ClearSelectionAndLoadSet(set)
 	self:DisableAll_OnClick()
-	
+
 	self:LoadSet(set)
 end
 
@@ -1250,7 +1336,7 @@ function ACP:Security_OnClick(addon)
      self:AddonList_OnShow()
 end
 
-function ACP:ShowSecurityTooltip()
+function ACP:ShowSecurityTooltip(this)
 	GameTooltip:SetOwner(this, "ANCHOR_BOTTOMLEFT")
 
     GameTooltip:AddLine(L["Click to enable protect mode. Protected addons will not be disabled"])
@@ -1365,8 +1451,8 @@ function ACP:Collapse_OnClick(obj)
 end
 
 function ACP:CollapseAll_OnClick()
-	local obj = getglobal(ACP_FRAME_NAME.."CollapseAll")
-	local icon = getglobal(ACP_FRAME_NAME.."CollapseAllIcon")
+	local obj = _G[ACP_FRAME_NAME.."CollapseAll"]
+	local icon = _G[ACP_FRAME_NAME.."CollapseAllIcon"]
 	obj.collapsed = toggle(obj.collapsed)
 	if obj.collapsed then
 		icon:SetTexture("Interface\\Minimap\\UI-Minimap-ZoomInButton-Up")
@@ -1448,6 +1534,7 @@ function ACP:AddonList_OnShow(this)
 
 	UpdateAddOnMemoryUsage()
 
+    local obj
 	local origNumAddons = GetNumAddOns()
 	numAddons = #sortedAddonList
 	FauxScrollFrame_Update(ACP_AddonList_ScrollFrame, numAddons, ACP_MAXADDONS, ACP_LINEHEIGHT, nil, nil, nil)
@@ -1455,7 +1542,7 @@ function ACP:AddonList_OnShow(this)
 	local offset = FauxScrollFrame_GetOffset(ACP_AddonList_ScrollFrame)
 	local curr_category = ""
 	for i = 1, ACP_MAXADDONS, 1 do
-		obj = getglobal("ACP_AddonListEntry"..i)
+		obj = _G["ACP_AddonListEntry"..i]
 		local addonIdx = sortedAddonList[offset+i]
 
    --     if not curr_category then
@@ -1465,15 +1552,15 @@ function ACP:AddonList_OnShow(this)
 			obj:Hide()
 			obj.addon = nil
 		else
-			local headerText = getglobal("ACP_AddonListEntry"..i.."Header")
-			local titleText = getglobal("ACP_AddonListEntry"..i.."Title")
-			local status = getglobal("ACP_AddonListEntry"..i.."Status")
-			local checkbox = getglobal("ACP_AddonListEntry"..i.."Enabled")
-			local securityButton = getglobal("ACP_AddonListEntry"..i.."Security")
-			local securityIcon = getglobal("ACP_AddonListEntry"..i.."SecurityIcon")
-			local loadnow = getglobal("ACP_AddonListEntry"..i.."LoadNow")
-			local collapse = getglobal("ACP_AddonListEntry"..i.."Collapse")
-			local collapseIcon = getglobal("ACP_AddonListEntry"..i.."CollapseIcon")
+			local headerText = _G["ACP_AddonListEntry"..i.."Header"]
+			local titleText = _G["ACP_AddonListEntry"..i.."Title"]
+			local status = _G["ACP_AddonListEntry"..i.."Status"]
+			local checkbox = _G["ACP_AddonListEntry"..i.."Enabled"]
+			local securityButton = _G["ACP_AddonListEntry"..i.."Security"]
+			local securityIcon = _G["ACP_AddonListEntry"..i.."SecurityIcon"]
+			local loadnow = _G["ACP_AddonListEntry"..i.."LoadNow"]
+			local collapse = _G["ACP_AddonListEntry"..i.."Collapse"]
+			local collapseIcon = _G["ACP_AddonListEntry"..i.."CollapseIcon"]
 
 
 			if type(addonIdx) == 'string' and not GetAddonIndex(addonIdx, true) then
@@ -1555,6 +1642,7 @@ function ACP:AddonList_OnShow(this)
 				else
 					titleText:SetTextColor(0.5,0.5,0.5)
 				end
+
 				if (title) then
 
 				    if subCount and subCount > 0 then
@@ -1601,18 +1689,27 @@ function ACP:AddonList_OnShow(this)
     					securityButton:Show()
     					checkbox:Hide()
                 else
-    				if (security == "SECURE") then
-    					setSecurity(securityIcon,1)
-    				elseif (security == "INSECURE") then
-    					setSecurity(securityIcon,2)
-    				elseif (security == "BANNED") then -- wtf?
-    					setSecurity(securityIcon,3)
-    				end
-    		    end
+--    				if (security == "SECURE") then
+--    					setSecurity(securityIcon,1)
+--    				elseif (security == "INSECURE") then
+--    					setSecurity(securityIcon,2)
+--    				elseif (security == "BANNED") then -- wtf?
+--    					setSecurity(securityIcon,3)
+--    				end
+
+                    local compat = self:GetAddonCompatibilitySummary(addonIdx)
+
+                    if compat ~= nil then
+                        setSecurity(securityIcon,1)
+                    else
+                        setSecurity(securityIcon,2)
+                    end
+
+                end
 
 --[[
 				if (reason) then
-					status:SetText(TEXT(getglobal("ADDON_"..reason)))
+					status:SetText(TEXT(_G["ADDON_"..reason)))
 				elseif (loaded) then
 					status:SetText(L["Loaded"])
 				elseif (ondemand) then
@@ -1694,7 +1791,7 @@ function ACP:SetDropDown_Populate(level)
 		UIDropDownMenu_AddButton(info)
 
 	elseif level == 2 then
-
+        local info
 		local setName = self:GetSetName(UIDROPDOWNMENU_MENU_VALUE)
 		info = UIDropDownMenu_CreateInfo()
 		info.text = setName
@@ -1726,8 +1823,8 @@ function ACP:SetDropDown_Populate(level)
 		info.func = function() self:LoadSet(UIDROPDOWNMENU_MENU_VALUE) end
 		info.notCheckable = 1
 		UIDropDownMenu_AddButton(info, level)
-		
-		
+
+
 		info = UIDropDownMenu_CreateInfo()
 		info.text = L["Remove from current selection"]
 		info.func = function() self:UnloadSet(UIDROPDOWNMENU_MENU_VALUE) end
@@ -1763,26 +1860,26 @@ do
 	ACP.embedded_libs_owners = {}
 
 
-	function ACP:ADDON_LOADED(name)	
+	function ACP:ADDON_LOADED(name)
 		if not LibStub then return end
 		self:LocateEmbeds()
-	
-		if name == "ACP" or name:sub(9) == "Blizzard_" then 
+
+		if name == "ACP" or name:sub(9) == "Blizzard_" then
 			name = "???"
 		end
-	
+
 		for k,v in pairs(ACP.embedded_libs_owners) do
 			if type(v) == "boolean" then
 				ACP.embedded_libs_owners[k] = name
 			end
 		end
-	
+
 	end
-	
+
 	-- /script ACP:LocateEmbeds()
 	function ACP:LocateEmbeds()
 		local embeds = LibStub.libs
-	
+
 		for k,v in pairs(embeds) do
 			if self.embedded_libs[k] ~= v then
 				self.embedded_libs[k] = v
@@ -1862,14 +1959,14 @@ function ACP:ShowTooltip(this, index)
 	local actives = nil
 	for k,v in pairs(self.embedded_libs_owners) do
 		if v == name then
-			if actives == nil then 
+			if actives == nil then
 				actives = CLR:Label(L["Active Embeds"])..": "..CLR:ActiveEmbed(k)
 			else
 				actives = actives..", "..CLR:ActiveEmbed(k)
 			end
 		end
 	end
-	if actives then 
+	if actives then
 	    GameTooltip:AddLine(actives, 1,0.78,0, 1)
 	end
 
@@ -1881,11 +1978,25 @@ function ACP:ShowTooltip(this, index)
 	else
 		text2 = ("|cff8080ff%.0f|r KiB"):format(mem)
 	end
-	
+
 	GameTooltip:AddLine(CLR:Label(L["Memory Usage"])..": "..text2, 1,0.78,0, 1)
 
-	GameTooltip:Show()
 
+
+
+    local high, low = self:IsAddonCompatibleWithCurrentIntefaceVersion(index)
+
+    if low == false then
+		GameTooltip:AddLine(CLR:Label("Compatible")..": ".. CLR:Bool(false, NO), 1,0.78,0, 1)
+    elseif high == false then
+		GameTooltip:AddLine(CLR:Label("Compatible")..": ".. CLR:Bool(false, NO), 1,0.78,0, 1)
+	elseif high or low then
+		GameTooltip:AddLine(CLR:Label("Compatible")..": ".. CLR:Bool(true, YES), 1,0.78,0, 1)
+	end
+
+
+
+	GameTooltip:Show()
 end
 
 
