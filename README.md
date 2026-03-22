@@ -6,6 +6,7 @@ This repo mirrors my active `Interface/AddOns` setup so I can keep multiple inst
 
 ## Current Notes
 
+- Unfortunately, auction mods don't work on Ebonhold
 - Added BugSack so that I could stop seeing the bugs from swatter. Never pop-ups, just auto save bugs for later.(still try to reduce)
 - Most of these updates are to work specifically with Ebonhold (less LUA errors and crashes)
 - Some of these mods are literally made by the Ebonhold community
@@ -17,7 +18,6 @@ This repo mirrors my active `Interface/AddOns` setup so I can keep multiple inst
 
 - **ArkInventory** - Full inventory, bank, sorting, filtering, and rule-based organization.
 - **Atlas / AtlasLoot** - Instance maps and loot browser.
-- **Auctionator** - Basically An Auto-Auction Addon
 - **Bartender4** - Action bar customization.
 - **Mapster** - World map improvements.
 - **OmniCC** - Cooldown text overlays.
