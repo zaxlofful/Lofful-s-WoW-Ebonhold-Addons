@@ -6,6 +6,9 @@ This repo mirrors my active `Interface/AddOns` setup so I can keep multiple inst
 
 ## Current Notes
 
+- Added BugSack so that I could stop seeing the bugs from swatter. Never pop-ups, just auto save bugs for later.(still try to reduce)
+- Most of these updates are to work specifically with Ebonhold (less LUA errors and crashes)
+- Some of these mods are literally made by the Ebonhold community
 - I moved a few addons around and replaced some older choices.
 - **ArkInventory is now my primary inventory/bank solution** (bags, bank, organization, search, and rules).
 - Default Blizzard UI addons are ignored in git and are not part of the custom addon set.
@@ -14,22 +17,22 @@ This repo mirrors my active `Interface/AddOns` setup so I can keep multiple inst
 
 - **ArkInventory** - Full inventory, bank, sorting, filtering, and rule-based organization.
 - **Atlas / AtlasLoot** - Instance maps and loot browser.
-- **Auctioner** - Basically An Auto-Auction Addon
+- **Auctionator** - Basically An Auto-Auction Addon
 - **Bartender4** - Action bar customization.
 - **Mapster** - World map improvements.
 - **OmniCC** - Cooldown text overlays.
-- **Recount** - Damage/healing meter.
+- **Details** - Damage/healing meter.
 - **WIM** - Whisper chat windows.
-- **X-Perl UnitFrames** - Unit frame replacement and layout control.
+- **Shadow Unit Frames** - Unit frame replacement and layout control.
 - **Titan Panel + modules** - Information bars and utility plugins.
 
 ## In-Game Quick Tips
 
-- ` /xperl ` for X-Perl options.
+- ` /suf ` for Shadow Unit Frame options.
 - ` /arkinventory ` for ArkInventory options.
 - ` /bartender ` for Bartender4 settings.
-- ` /recount config ` for Recount configuration.
+- ` /details ` for Details configuration.
 
 ## Screenshot
 
-![Screen Shot of the latest look open](https://github.com/ZaxLofful/Lofful-s-WoW-Classic-Addons/blob/master/1080p_open.png)
+No Longer valid
