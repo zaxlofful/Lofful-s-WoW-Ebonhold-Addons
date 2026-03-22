@@ -1,0 +1,32 @@
+﻿## Interface: 30300
+## Title: Ebonhold Search and Destroy
+## Notes: Rare NPC scanner and map overlay for Project Ebonhold (WotLK 3.3.5a)
+## Author: Serv (powerfulqa)
+
+## Version: 2.1.5
+## X-Date: 2026-03-19
+## X-Category: Miscellaneous
+## X-License: GPLv3
+
+## X-Localizations: enUS
+## X-CompatibleLocales: enUS
+## X-Embeds: LibTextTable-1.0, LibSharedMedia-3.0
+## SavedVariables: EbonSearchDB
+## SavedVariablesPerCharacter: EbonSearchCharacterDB
+## OptionalDeps: Ace3, LibTextTable-1.0, LibSharedMedia-3.0, LibRareSpawns
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.xml
+
+Embeds.xml
+Locales.xml
+
+EbonSearch.lua
+generated_npcscan_rare_tables.lua
+EbonSearch.WowheadRares.lua
+EbonSearch.Button.lua
+EbonSearch.Overlays.lua
+EbonSearch.TamableIDs.lua
+
+EbonSearch.Config.lua
+EbonSearch.Config.Search.lua
+EbonSearch.MinimapButton.lua
