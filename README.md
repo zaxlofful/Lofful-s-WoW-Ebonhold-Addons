@@ -25,6 +25,8 @@ This repo mirrors my active `Interface/AddOns` setup so I can keep multiple inst
 - **WIM** - Whisper chat windows.
 - **Shadow Unit Frames** - Unit frame replacement and layout control.
 - **Titan Panel + modules** - Information bars and utility plugins.
+- **WeakAuras** - This is foremost to make the Ebonhold echo UI stay where I want it to
+- **Move Anything** - Can move any of the normal frames in anyway. Move the quests out of the way.
 
 ## In-Game Quick Tips
 
