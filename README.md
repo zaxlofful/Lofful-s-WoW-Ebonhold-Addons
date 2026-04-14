@@ -34,6 +34,7 @@ This repo mirrors my active `Interface/AddOns` setup so I can keep multiple inst
 - ` /arkinventory ` for ArkInventory options.
 - ` /bartender ` for Bartender4 settings.
 - ` /details ` for Details configuration.
+- ` /eal ` for Auto-Loot/Auto-Sell configuration and automation.
 
 ## Screenshot
 
