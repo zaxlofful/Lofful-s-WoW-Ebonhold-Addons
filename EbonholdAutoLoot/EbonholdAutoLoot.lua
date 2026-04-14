@@ -47,7 +47,7 @@ local MAX_COMPANION_DISTANCE = 5   -- yards; resummon if pet exceeds this from p
 -- calls in a single MERCHANT_SHOW callback, which can cause low-end clients to
 -- disconnect.  If more items remain after the cap is hit, open the vendor again
 -- to sell the next batch.
-local MAX_SELL_PER_PULSE = 80
+local MAX_SELL_PER_PULSE = 45
 
 -- SavedVariables schema / defaults
 local DEFAULTS = {
@@ -334,7 +334,7 @@ local function SellItems(totalSold, totalSkipped)
     -- sell the next batch.  Sold items are gone from the bags so re-scanning
     -- from bag 0 naturally picks up the remainder.
     if capped and MerchantFrame:IsShown() then
-        After(0.5, function()
+        After(1.0, function()
             SellItems(totalSold, totalSkipped)
         end)
     else
