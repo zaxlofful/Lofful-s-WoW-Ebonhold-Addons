@@ -12,7 +12,21 @@ local ButtonBar = Bartender4.ButtonBar.prototype
 -- create prototype information
 local MicroMenuBar = setmetatable({}, {__index = ButtonBar})
 
+local _G = _G
 local table_insert = table.insert
+
+local defaultButtonNames = {
+	"CharacterMicroButton",
+	"SpellbookMicroButton",
+	"TalentMicroButton",
+	"AchievementMicroButton",
+	"QuestLogMicroButton",
+	"SocialsMicroButton",
+	"PVPMicroButton",
+	"LFDMicroButton",
+	"MainMenuMicroButton",
+	"HelpMicroButton",
+}
 
 local defaults = { profile = Bartender4:Merge({
 	enabled = true,
@@ -34,33 +48,66 @@ end
 function MicroMenuMod:OnEnable()
 	if not self.bar then
 		self.bar = setmetatable(Bartender4.ButtonBar:Create("MicroMenu", self.db.profile, L["Micro Menu"]), {__index = MicroMenuBar})
-		local buttons = {}
-		table_insert(buttons, CharacterMicroButton)
-		table_insert(buttons, SpellbookMicroButton)
-		table_insert(buttons, TalentMicroButton)
-		table_insert(buttons, AchievementMicroButton)
-		table_insert(buttons, QuestLogMicroButton)
-		table_insert(buttons, SocialsMicroButton)
-		table_insert(buttons, PVPMicroButton)
-		table_insert(buttons, LFDMicroButton)
-		table_insert(buttons, MainMenuMicroButton)
-		table_insert(buttons, HelpMicroButton)
-		self.bar.buttons = buttons
-
-		MicroMenuMod.button_count = #buttons
+		self:UpdateButtons()
 
 		self:SecureHook("UpdateMicroButtons")
-
-		for i,v in pairs(buttons) do
-			v:SetParent(self.bar)
-			v:Show()
-			v:SetFrameLevel(self.bar:GetFrameLevel() + 1)
-			v.ClearSetPoint = self.bar.ClearSetPoint
-		end
 	end
+	self:UpdateButtons()
 	self.bar:Enable()
 	self:ToggleOptions()
 	self:ApplyConfig()
+end
+
+function MicroMenuMod:UpdateButtons()
+	if not self.bar then return end
+
+	local buttons = {}
+	local seen = {}
+
+	local function addButton(btn)
+		if not btn or seen[btn] then return end
+		seen[btn] = true
+		table_insert(buttons, btn)
+	end
+
+	if type(MICRO_BUTTONS) == "table" then
+		for i, name in ipairs(MICRO_BUTTONS) do
+			addButton(_G[name])
+		end
+	end
+
+	if #buttons == 0 then
+		for i, name in ipairs(defaultButtonNames) do
+			addButton(_G[name])
+		end
+	end
+
+	-- Also catch custom micro buttons attached to the default micro menu parent.
+	local defaultParent = HelpMicroButton and HelpMicroButton:GetParent()
+	if defaultParent then
+		for i, child in ipairs({defaultParent:GetChildren()}) do
+			if child and child:IsObjectType("Button") then
+				local name = child:GetName()
+				if name and name:find("MicroButton") then
+					addButton(child)
+				end
+			end
+		end
+	end
+
+	self.bar.buttons = buttons
+	MicroMenuMod.button_count = #buttons
+
+	for i, v in pairs(buttons) do
+		v:SetParent(self.bar)
+		v:Show()
+		v:SetFrameLevel(self.bar:GetFrameLevel() + 1)
+		v.ClearSetPoint = self.bar.ClearSetPoint
+	end
+
+	if self.optionobject then
+		self.optionobject.table.general.args.rows.max = #buttons
+	end
 end
 
 function MicroMenuMod:ApplyConfig()
@@ -69,6 +116,7 @@ end
 
 function MicroMenuMod:RestoreButtons()
 	if not self:IsEnabled() then return end
+	self:UpdateButtons()
 	for k,v in pairs(self.bar.buttons) do
 		v:SetParent(self.bar)
 		v:Show()
