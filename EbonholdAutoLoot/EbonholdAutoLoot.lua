@@ -1,5 +1,5 @@
 -------------------------------------------------------------------------------
--- EbonholdAutoLoot  v2.8
+-- EbonholdAutoLoot  v2.10
 --
 -- Automatically loots using the Greedy Scavenger companion pet, then switches
 -- to the Goblin Merchant companion to sell unwanted items when bags are full.
@@ -22,6 +22,7 @@
 -------------------------------------------------------------------------------
 
 local ADDON_NAME      = "EbonholdAutoLoot"
+local ADDON_VERSION   = GetAddOnMetadata(ADDON_NAME, "Version")
 local LOOT_PET_NAME   = "Greedy Scavenger"
 local VENDOR_PET_NAME = "Goblin Merchant"
 
@@ -44,10 +45,15 @@ local S_SELLING = "SELLING"
 local MAX_COMPANION_DISTANCE = 5   -- yards; resummon if pet exceeds this from player
 
 -- Per-pulse sell cap: avoids flooding the server with too many UseContainerItem
--- calls in a single MERCHANT_SHOW callback, which can cause low-end clients to
--- disconnect.  If more items remain after the cap is hit, open the vendor again
--- to sell the next batch.
+-- calls in a single MERCHANT_SHOW callback, which can cause some clients to
+-- disconnect. If more items remain after the cap is hit, additional batches
+-- are sold automatically after a short delay while MerchantFrame stays open;
+-- if it closes first, the sell cycle still finishes cleanly.
 local MAX_SELL_PER_PULSE = 45
+
+-- Fast Mode multipliers: doubles items per batch, halves the batch delay.
+local FAST_MODE_BATCH_MULTIPLIER = 2
+local FAST_MODE_DELAY_DIVISOR    = 2
 
 -- SavedVariables schema / defaults
 local DEFAULTS = {
@@ -57,7 +63,8 @@ local DEFAULTS = {
     sellUncommon  = false,
     sellRare      = false,
     sellEpic      = false,
-    blacklist     = {},
+    fastMode      = false,
+    whitelist     = {},
     checkInterval  = 3,     -- seconds between free-slot checks while looting
     windowX        = 100,
     windowY        = -200,
@@ -80,8 +87,9 @@ local g_statusLabel
 local g_enableBtn
 local g_vendorBtn                 -- on-screen SecureActionButton (UIParent child)
 local g_vendorBtnToggle           -- GUI button that shows/hides g_vendorBtn
-local g_blacklistRows   = {}
-local g_blacklistOffset = 0   -- hand-rolled scroll offset (no FauxScrollFrame)
+local gui
+local g_whitelistRows   = {}
+local g_whitelistOffset = 0   -- hand-rolled scroll offset (no FauxScrollFrame)
 local g_scrollThumb               -- visual-only scrollbar thumb
 local ROW_HEIGHT        = 22
 local MAX_ROWS          = 8
@@ -125,43 +133,13 @@ local function GetTotalFreeSlots()
     return free
 end
 
-local function IsBlacklisted(itemName)
+local function IsWhitelisted(itemName)
     if not itemName then return false end
     local lower = itemName:lower()
-    for _, entry in ipairs(EAL_DB.blacklist) do
+    for _, entry in ipairs(EAL_DB.whitelist) do
         if entry:lower() == lower then return true end
     end
     return false
-end
-
-local TOME_PREFIX       = "Tome of Echo:"
-local TOME_PREFIX_LOWER = TOME_PREFIX:lower()
-
--- Scans all bag slots and adds every item whose name starts with
--- "Tome of Echo:" to the blacklist (if not already present).
-local function EAL_WhitelistTomes()
-    local added = 0
-    for bag = 0, 4 do
-        local numSlots = GetContainerNumSlots(bag)
-        for slot = 1, numSlots do
-            local link = GetContainerItemLink(bag, slot)
-            if link then
-                local name = GetItemInfo(link)
-                if name and name:lower():sub(1, #TOME_PREFIX_LOWER) == TOME_PREFIX_LOWER then
-                    if not IsBlacklisted(name) then
-                        table.insert(EAL_DB.blacklist, name)
-                        added = added + 1
-                    end
-                end
-            end
-        end
-    end
-    if added > 0 then
-        EAL_RefreshBlacklist()
-        Print("|cffffff00" .. added .. "|r Tome of Echo item(s) whitelisted.")
-    else
-        Print("No new Tome of Echo items found in bags (already whitelisted or not in bags).")
-    end
 end
 
 -- Returns companion index (1-based) and whether it is currently summoned.
@@ -209,6 +187,7 @@ end
 -- the player has no active combat pet.  Returns nil if either position is
 -- unavailable (unit doesn't exist, UnitPosition not supported, etc.).
 local function GetCompanionDistance()
+    if not UnitPosition then return nil end
     local px, py = UnitPosition("player")
     local cx, cy = UnitPosition("pet")
     if not px or not cx then return nil end
@@ -219,8 +198,9 @@ end
 -------------------------------------------------------------------------------
 -- 3. STATUS / GUI REFRESH
 -------------------------------------------------------------------------------
-local function EAL_UpdateStatus()
+local function EAL_UpdateStatus(free)
     if not g_statusLabel then return end
+    free = free or GetTotalFreeSlots()
 
     local stateColor
     if     currentState == S_IDLE    then stateColor = "|cffaaaaaa"
@@ -229,7 +209,6 @@ local function EAL_UpdateStatus()
     else                                  stateColor = "|cffaaaaaa"
     end
 
-    local free      = GetTotalFreeSlots()
     local freeColor = (free == 0) and "|cffff4444" or (free <= 4 and "|cffff9900" or "|cffffff00")
 
     g_statusLabel:SetText(
@@ -242,23 +221,23 @@ local function EAL_UpdateStatus()
     end
 end
 
-local function EAL_RefreshBlacklist()
+local function EAL_RefreshWhitelist()
     if not EAL_DB then return end
-    local total = #EAL_DB.blacklist
+    local total = #EAL_DB.whitelist
     -- clamp offset so it never points past the list
-    g_blacklistOffset = math.max(0, math.min(g_blacklistOffset,
+    g_whitelistOffset = math.max(0, math.min(g_whitelistOffset,
                                               math.max(0, total - MAX_ROWS)))
 
     for i = 1, MAX_ROWS do
-        local row = g_blacklistRows[i]
+        local row = g_whitelistRows[i]
         if row then
-            local idx = g_blacklistOffset + i
+            local idx = g_whitelistOffset + i
             if idx <= total then
-                row.label:SetText(EAL_DB.blacklist[idx])
+                row.label:SetText(EAL_DB.whitelist[idx])
                 local capturedIdx = idx
                 row.removeBtn:SetScript("OnClick", function()
-                    table.remove(EAL_DB.blacklist, capturedIdx)
-                    EAL_RefreshBlacklist()
+                    table.remove(EAL_DB.whitelist, capturedIdx)
+                    EAL_RefreshWhitelist()
                 end)
                 row:Show()
             else
@@ -275,7 +254,7 @@ local function EAL_RefreshBlacklist()
         else
             local thumbH = math.max(16, trackH * MAX_ROWS / total)
             local maxOff = total - MAX_ROWS
-            local thumbY = -(g_blacklistOffset / maxOff) * (trackH - thumbH)
+            local thumbY = -(g_whitelistOffset / maxOff) * (trackH - thumbH)
             g_scrollThumb:SetHeight(thumbH)
             g_scrollThumb:SetPoint("TOP", 0, thumbY)
             g_scrollThumb:Show()
@@ -283,16 +262,117 @@ local function EAL_RefreshBlacklist()
     end
 end
 
+local function EAL_InitializeDB()
+    EAL_SavedDB = EAL_SavedDB or {}
+    EAL_DB = EAL_SavedDB
+
+    -- Backfill defaults for missing keys.
+    for k, v in pairs(DEFAULTS) do
+        if EAL_DB[k] == nil then
+            EAL_DB[k] = (type(v) == "table") and {} or v
+        end
+    end
+
+    -- Ensure whitelist is a table even if SavedVariables were corrupted.
+    if type(EAL_DB.whitelist) ~= "table" then
+        EAL_DB.whitelist = {}
+    else
+        -- Sanitize corrupted whitelist entries before any IsWhitelisted() call.
+        local sanitizedWhitelist = {}
+        for _, entry in ipairs(EAL_DB.whitelist) do
+            if type(entry) == "string" and entry ~= "" then
+                table.insert(sanitizedWhitelist, entry)
+            end
+        end
+        EAL_DB.whitelist = sanitizedWhitelist
+    end
+
+    -- Migrate any legacy blacklist entries into the whitelist.
+    -- This is safe for partially migrated profiles because IsWhitelisted
+    -- prevents duplicate inserts when whitelist data already exists.
+    if type(EAL_DB.blacklist) == "table" then
+        for _, name in ipairs(EAL_DB.blacklist) do
+            if type(name) == "string" and name ~= "" and not IsWhitelisted(name) then
+                table.insert(EAL_DB.whitelist, name)
+            end
+        end
+    end
+
+    -- Clear legacy key after migration.
+    EAL_DB.blacklist = nil
+end
+
+local TOME_PREFIX       = "Tome of Echo:"
+local TOME_PREFIX_LOWER = TOME_PREFIX:lower()
+
+-- Scans all bag slots and adds every item whose name starts with
+-- "Tome of Echo:" to the whitelist (if not already present).
+local function EAL_WhitelistTomes()
+    local added = 0
+    for bag = 0, 4 do
+        local numSlots = GetContainerNumSlots(bag)
+        for slot = 1, numSlots do
+            local link = GetContainerItemLink(bag, slot)
+            if link then
+                local name = GetItemInfo(link)
+                if name and name:lower():sub(1, #TOME_PREFIX_LOWER) == TOME_PREFIX_LOWER then
+                    if not IsWhitelisted(name) then
+                        table.insert(EAL_DB.whitelist, name)
+                        added = added + 1
+                    end
+                end
+            end
+        end
+    end
+    if added > 0 then
+        EAL_RefreshWhitelist()
+        Print("|cffffff00" .. added .. "|r Tome of Echo item(s) whitelisted.")
+    else
+        Print("No new Tome of Echo items found in bags (already whitelisted or not in bags).")
+    end
+end
+
+local function ToggleGUI()
+    if not gui then
+        Print("GUI not ready yet.", 1, 0.5, 0.5)
+        return
+    end
+
+    if gui:IsShown() then
+        gui:Hide()
+    else
+        EAL_UpdateStatus()
+        EAL_RefreshWhitelist()
+        gui:Show()
+    end
+end
+
+
 -------------------------------------------------------------------------------
--- 5. SELLING LOGIC
+-- 4. SELLING LOGIC
 -------------------------------------------------------------------------------
 -- totalSold / totalSkipped accumulate across batches within a single vendor session.
+local SELL_BATCH_DELAY = 1.0
+
+local function FinishSelling(totalSold, totalSkipped)
+    if totalSold > 0 or totalSkipped > 0 then
+        Print("Sold |cffffff00" .. totalSold ..
+              "|r item(s). Whitelisted (kept): |cffffff00" .. totalSkipped .. "|r.")
+    else
+        Print("Nothing to sell with current quality settings.")
+    end
+    EAL_UpdateStatus()
+end
+
 local function SellItems(totalSold, totalSkipped)
     totalSold    = totalSold    or 0
     totalSkipped = totalSkipped or 0
     local sold   = 0
     local skipped = 0
     local capped  = false
+
+    local pulseCap   = EAL_DB.fastMode and (MAX_SELL_PER_PULSE * FAST_MODE_BATCH_MULTIPLIER) or MAX_SELL_PER_PULSE
+    local batchDelay = EAL_DB.fastMode and (SELL_BATCH_DELAY / FAST_MODE_DELAY_DIVISOR)      or SELL_BATCH_DELAY
 
     for bag = 0, 4 do
         if capped then break end
@@ -309,7 +389,7 @@ local function SellItems(totalSold, totalSkipped)
                         (quality == Q_RARE     and EAL_DB.sellRare)     or
                         (quality == Q_EPIC     and EAL_DB.sellEpic)
 
-                    if sell and IsBlacklisted(name) then
+                    if sell and IsWhitelisted(name) then
                         sell    = false
                         skipped = skipped + 1
                     end
@@ -317,7 +397,7 @@ local function SellItems(totalSold, totalSkipped)
                     if sell then
                         UseContainerItem(bag, slot)
                         sold = sold + 1
-                        if sold >= MAX_SELL_PER_PULSE then
+                        if sold >= pulseCap then
                             capped = true
                             break
                         end
@@ -330,26 +410,24 @@ local function SellItems(totalSold, totalSkipped)
     totalSold    = totalSold    + sold
     totalSkipped = totalSkipped + skipped
 
-    -- If we hit the cap and the vendor window is still open, wait 0.5 s then
-    -- sell the next batch.  Sold items are gone from the bags so re-scanning
-    -- from bag 0 naturally picks up the remainder.
+    -- If we hit the cap and the vendor window is still open, wait
+    -- batchDelay seconds, then sell the next batch. Sold items are gone
+    -- from the bags so re-scanning from bag 0 naturally picks up the remainder.
     if capped and MerchantFrame:IsShown() then
-        After(1.0, function()
-            SellItems(totalSold, totalSkipped)
+        After(batchDelay, function()
+            if MerchantFrame:IsShown() then
+                SellItems(totalSold, totalSkipped)
+            else
+                FinishSelling(totalSold, totalSkipped)
+            end
         end)
     else
-        if totalSold > 0 or totalSkipped > 0 then
-            Print("Sold |cffffff00" .. totalSold ..
-                  "|r item(s). Whitelisted (kept): |cffffff00" .. totalSkipped .. "|r.")
-        else
-            Print("Nothing to sell with current quality settings.")
-        end
-        EAL_UpdateStatus()
+        FinishSelling(totalSold, totalSkipped)
     end
 end
 
 -------------------------------------------------------------------------------
--- 6. STATE MACHINE
+-- 5. STATE MACHINE
 -------------------------------------------------------------------------------
 local function SetState(state)
     currentState = state
@@ -474,7 +552,9 @@ local function OnUpdate(self, elapsed)
         bagCheckTimer = bagCheckTimer + elapsed
         if bagCheckTimer >= (EAL_DB.checkInterval or 3) then
             bagCheckTimer = 0
-            if GetTotalFreeSlots() == 0 then
+            local free = GetTotalFreeSlots()
+            EAL_UpdateStatus(free)
+            if free == 0 then
                 StartSellCycle()
             else
                 -- Only run stuck check when we're not already switching to sell;
@@ -487,7 +567,7 @@ local function OnUpdate(self, elapsed)
 end
 
 -------------------------------------------------------------------------------
--- 7. ON-SCREEN VENDOR BUTTON
+-- 6. ON-SCREEN VENDOR BUTTON
 -------------------------------------------------------------------------------
 -- A SecureActionButtonTemplate button parented directly to UIParent.
 -- Its attribute is set once at creation (outside combat) so it remains
@@ -506,7 +586,9 @@ local function EAL_BuildVendorButton()
     btn:RegisterForClicks("AnyUp")
     btn:SetFrameStrata("MEDIUM")
 
-    -- Attribute locked in at creation — valid during combat lockdown
+    -- Attributes locked in at creation — valid during combat lockdown.
+    -- Plain clicks target the vendor; Ctrl-clicks also run the target macro,
+    -- then the PostClick hook additionally toggles the settings GUI.
     btn:SetAttribute("type", "macro")
     btn:SetAttribute("macrotext", "/target " .. VENDOR_PET_NAME)
 
@@ -538,12 +620,20 @@ local function EAL_BuildVendorButton()
         EAL_DB.vendorBtnY = self:GetTop() - UIParent:GetHeight()
     end)
 
+    -- Ctrl+Click opens the main settings GUI without replacing the secure click handler
+    btn:HookScript("PostClick", function(self, button)
+        if IsControlKeyDown() then
+            ToggleGUI()
+        end
+    end)
+
     -- Tooltip
     btn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("|cffff9900Target Goblin Merchant|r")
         GameTooltip:AddLine("|cffaaaaaaClick to target the vendor companion|r")
         GameTooltip:AddLine("|cffaaaaaaThen press Interact with Target to sell|r")
+        GameTooltip:AddLine("|cffaaaaaaCtrl+Click to target the vendor and open settings|r")
         GameTooltip:AddLine("|cffaaaaaaAlt+Drag to reposition|r")
         GameTooltip:Show()
     end)
@@ -555,7 +645,7 @@ local function EAL_BuildVendorButton()
 end
 
 -------------------------------------------------------------------------------
--- 8. GUI
+-- 7. GUI
 -------------------------------------------------------------------------------
 local function MakeHeader(parent, text, x, y)
     local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -616,21 +706,45 @@ local function EAL_BuildGUI()
     -- Title bar
     local title = win:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -14)
-    title:SetText("|cffff9900Ebonhold|r AutoLoot  |cffaaaaaa& Sell|r")
+    title:SetText("|cffff9900Ebonhold|r AutoLoot |cffaaaaaa& Sell|r")
 
     local closeBtn = CreateFrame("Button", nil, win, "UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT", -4, -4)
     closeBtn:SetScript("OnClick", function() win:Hide() end)
 
     -- ----------------------------------------------------------------
-    -- Status row
+    -- Status row  (status text left, Fast Mode checkbox right)
     -- ----------------------------------------------------------------
     MakeDivider(win, -36)
     local statusLabel = win:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     statusLabel:SetPoint("TOPLEFT", 18, -48)
-    statusLabel:SetWidth(300)
+    statusLabel:SetWidth(200)
     statusLabel:SetJustifyH("LEFT")
     g_statusLabel = statusLabel
+
+    -- Fast Mode checkbox anchored to the right of the status row
+    local fastModeCb = CreateFrame("CheckButton", nil, win, "UICheckButtonTemplate")
+    fastModeCb:SetPoint("TOPRIGHT", -11, -42)
+    fastModeCb:SetWidth(24); fastModeCb:SetHeight(24)
+    fastModeCb:SetChecked(EAL_DB.fastMode)
+
+    local fastModeLbl = win:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    fastModeLbl:SetPoint("RIGHT", fastModeCb, "LEFT", -2, 0)
+    fastModeLbl:SetText("|cffff4444Fast Mode|r")
+
+    fastModeCb:SetScript("OnClick", function(self)
+        EAL_DB.fastMode = self:GetChecked() and true or false
+    end)
+    fastModeCb:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:AddLine("|cffff4444Fast Mode|r")
+        GameTooltip:AddLine("|cffff9900Warning: this could decrease performance|r")
+        GameTooltip:AddLine("|cffff9900and cause crashes.|r")
+        GameTooltip:AddLine("|cffaaaaaaDoubles items sold per batch and|r")
+        GameTooltip:AddLine("|cffaaaaaahalves the delay between batches.|r")
+        GameTooltip:Show()
+    end)
+    fastModeCb:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- ----------------------------------------------------------------
     -- Row 1: Enable / Disable  +  Force Sell
@@ -718,33 +832,33 @@ local function EAL_BuildGUI()
     end
 
     -- ----------------------------------------------------------------
-    -- Blacklist section
+    -- Whitelist section
     -- ----------------------------------------------------------------
     MakeDivider(win, -234)
     MakeHeader(win, "ITEM WHITELIST  (these items are never sold)", 18, -244)
 
-    local inputBox = CreateFrame("EditBox", "EAL_BlacklistInput", win, "InputBoxTemplate")
+    local inputBox = CreateFrame("EditBox", "EAL_WhitelistInput", win, "InputBoxTemplate")
     inputBox:SetPoint("TOPLEFT", 18, -266)
     inputBox:SetWidth(224); inputBox:SetHeight(20)
     inputBox:SetAutoFocus(false)
     inputBox:SetMaxLetters(64)
 
-    local function AddBlacklistEntry()
+    local function AddWhitelistEntry()
         local text = inputBox:GetText():match("^%s*(.-)%s*$")
         if text == "" then return end
-        for _, v in ipairs(EAL_DB.blacklist) do
+        for _, v in ipairs(EAL_DB.whitelist) do
             if v:lower() == text:lower() then
                 inputBox:SetText("")
                 return
             end
         end
-        table.insert(EAL_DB.blacklist, text)
+        table.insert(EAL_DB.whitelist, text)
         inputBox:SetText("")
-        EAL_RefreshBlacklist()
+        EAL_RefreshWhitelist()
     end
 
     inputBox:SetScript("OnEnterPressed", function(self)
-        AddBlacklistEntry()
+        AddWhitelistEntry()
         self:ClearFocus()
     end)
 
@@ -752,16 +866,53 @@ local function EAL_BuildGUI()
     addBtn:SetPoint("TOPLEFT", 250, -264)
     addBtn:SetWidth(72); addBtn:SetHeight(22)
     addBtn:SetText("Add")
-    addBtn:SetScript("OnClick", AddBlacklistEntry)
+    addBtn:SetScript("OnClick", AddWhitelistEntry)
 
     local tomeBtn = CreateFrame("Button", nil, win, "GameMenuButtonTemplate")
     tomeBtn:SetPoint("TOPLEFT", 18, -290)
-    tomeBtn:SetWidth(304); tomeBtn:SetHeight(22)
-    tomeBtn:SetText('Whitelist all "Tome of Echo:" in bags')
+    tomeBtn:SetWidth(230); tomeBtn:SetHeight(22)
+    tomeBtn:SetText('Whitelist "Tome of Echo:" in bags')
     tomeBtn:SetScript("OnClick", EAL_WhitelistTomes)
 
+    local WHITELIST_DEFAULTS = {
+        "Runic Healing Potion",
+        "Runic Mana Potion",
+        "Frostweave Cloth",
+        "Skinning Knife",
+        "Hearthstone",
+        "Book of Glyph Mastery",
+        "Frozen Orb",
+        "Crystallized Fire",
+        "Crystallized Water",
+        "Crystallized Air",
+        "Crystallized Earth",
+        "Crystallized Shadow",
+        "Crystallized Life",
+        "Abandoned Adventurer's Satchel",
+        -- Add more defaults here as desired
+    }
+    local defaultsBtn = CreateFrame("Button", nil, win, "GameMenuButtonTemplate")
+    defaultsBtn:SetPoint("TOPLEFT", 250, -290)
+    defaultsBtn:SetWidth(70); defaultsBtn:SetHeight(22)
+    defaultsBtn:SetText("Defaults")
+    defaultsBtn:SetScript("OnClick", function()
+        local added = 0
+        for _, name in ipairs(WHITELIST_DEFAULTS) do
+            if not IsWhitelisted(name) then
+                table.insert(EAL_DB.whitelist, name)
+                added = added + 1
+            end
+        end
+        EAL_RefreshWhitelist()
+        if added > 0 then
+            Print("|cffffff00" .. added .. "|r default item(s) added to whitelist.")
+        else
+            Print("All default items are already whitelisted.")
+        end
+    end)
+
     -- ----------------------------------------------------------------
-    -- Scrollable blacklist  (hand-rolled, mouse-wheel scroll)
+    -- Scrollable whitelist  (hand-rolled, mouse-wheel scroll)
     -- ----------------------------------------------------------------
     local TRACK_W = 8   -- width of the slim scrollbar track on the right
     local listBg = CreateFrame("Frame", nil, win)
@@ -778,8 +929,8 @@ local function EAL_BuildGUI()
     -- Mouse wheel scrolls the list
     listBg:EnableMouseWheel(true)
     listBg:SetScript("OnMouseWheel", function(self, delta)
-        g_blacklistOffset = g_blacklistOffset - delta
-        EAL_RefreshBlacklist()
+        g_whitelistOffset = g_whitelistOffset - delta
+        EAL_RefreshWhitelist()
     end)
 
     -- Row width: full inner width minus the scrollbar track
@@ -813,7 +964,7 @@ local function EAL_BuildGUI()
         row.label     = lbl
         row.removeBtn = removeBtn
         row:Hide()
-        g_blacklistRows[i] = row
+        g_whitelistRows[i] = row
     end
 
     -- Slim scrollbar: dark track + lighter thumb (visual only, no buttons)
@@ -841,7 +992,7 @@ local function EAL_BuildGUI()
     hint:SetText("|cffaaaaaa/eal — toggle window  |  /eal enable / disable / reset|r")
 
     EAL_UpdateStatus()
-    EAL_RefreshBlacklist()
+    EAL_RefreshWhitelist()
 
     return win
 end
@@ -849,8 +1000,6 @@ end
 -------------------------------------------------------------------------------
 -- 8. EVENT FRAME
 -------------------------------------------------------------------------------
-local gui
-
 local eventFrame = CreateFrame("Frame", "EAL_EventFrame", UIParent)
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
@@ -861,28 +1010,16 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
         local name = ...
         if name == ADDON_NAME then
-            EAL_SavedDB = EAL_SavedDB or {}
-            EAL_DB = EAL_SavedDB
-            for k, v in pairs(DEFAULTS) do
-                if EAL_DB[k] == nil then
-                    EAL_DB[k] = (type(v) == "table") and {} or v
-                end
-            end
+            EAL_InitializeDB()
         end
 
     elseif event == "PLAYER_LOGIN" then
         if not EAL_DB then
-            EAL_SavedDB = EAL_SavedDB or {}
-            EAL_DB = EAL_SavedDB
-            for k, v in pairs(DEFAULTS) do
-                if EAL_DB[k] == nil then
-                    EAL_DB[k] = (type(v) == "table") and {} or v
-                end
-            end
+            EAL_InitializeDB()
         end
         gui       = EAL_BuildGUI()
         g_vendorBtn = EAL_BuildVendorButton()
-        Print("v2.8 loaded.  |cffffff00/eal|r to open settings.")
+        Print("v" .. ADDON_VERSION .. " loaded.  |cffffff00/eal|r to open settings.")
 
     elseif event == "MERCHANT_SHOW" then
         OnMerchantShow()
@@ -909,8 +1046,8 @@ SlashCmdList["EBAUTOLOOT"] = function(msg)
     local cmd = msg and msg:lower():match("^%s*(%S*)") or ""
 
     if cmd == "reset" then
-        EAL_DB.blacklist = {}
-        EAL_RefreshBlacklist()
+        EAL_DB.whitelist = {}
+        EAL_RefreshWhitelist()
         Print("Whitelist cleared.")
     elseif cmd == "enable" then
         EAL_DB.enabled = true
@@ -921,12 +1058,6 @@ SlashCmdList["EBAUTOLOOT"] = function(msg)
         DismissPet()
         SetState(S_IDLE)
     else
-        if gui:IsShown() then
-            gui:Hide()
-        else
-            EAL_UpdateStatus()
-            EAL_RefreshBlacklist()
-            gui:Show()
-        end
+        ToggleGUI()
     end
 end

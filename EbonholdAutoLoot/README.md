@@ -8,11 +8,13 @@ A WoW 3.3.5a AddOn for **Project Ebonhold** that automates the loot-and-sell cyc
 
 - **Auto-loot cycle** — Summons the Greedy Scavenger and monitors your bags every 3 seconds. When every slot is full it automatically dismisses the Scavenger and summons the Goblin Merchant.
 - **Auto-repair** — Calls `RepairAllItems()` the moment a merchant window opens, before selling, so durability is always restored first.
-- **Auto-sell on merchant open** — Scans your bags and sells all qualifying items the instant any vendor window opens. Items are sold in batches of up to 80 per pulse with a 0.5-second pause between batches; the vendor window stays open throughout and a single summary prints when the last batch finishes.
+- **Auto-sell on merchant open** — Scans your bags and sells all qualifying items the instant any vendor window opens. Items are sold in batches of up to **45 per pulse** with a **1.0-second pause** between batches to prevent server disconnects on large inventories; the vendor window stays open throughout and a single summary prints when the last batch finishes. A high-end release with the original 80-item / 0.5 s settings is available separately for machines that do not experience disconnects.
 - **Per-quality sell toggles** — Choose exactly which quality tiers to sell: Grey, White, Uncommon, Rare, and/or Epic.
+- **Fast Mode toggle** — Optional high-throughput mode that doubles items sold per batch and halves the inter-batch delay.
 - **Item whitelist** — Add item names to a protected list; whitelisted items are never sold regardless of quality.
 - **Whitelist Tome of Echo items** — One-click button scans your bags and whitelists every item whose name starts with `Tome of Echo:` automatically.
-- **On-screen vendor button** — A draggable `SecureActionButtonTemplate` button (parented to UIParent) targets the Goblin Merchant on click. Works in and out of combat. Alt+Drag to reposition; position is saved between sessions.
+- **Whitelist defaults button** — Adds a curated starter set of commonly kept items (potions, cloth, hearthstone, etc.) to your whitelist.
+- **On-screen vendor button** — A draggable `SecureActionButtonTemplate` button (parented to UIParent) targets the Goblin Merchant on normal click. Ctrl+Click still targets the Goblin Merchant and also opens settings, without replacing the secure click handler. Works in and out of combat. Alt+Drag to reposition; position is saved between sessions.
 - **Mount-aware companion management** — Dismisses the active companion automatically when you mount. Re-summons the correct pet (Greedy Scavenger or Goblin Merchant) 1.5 seconds after dismounting.
 - **Companion stuck detection** — Every bag-check tick, if the Greedy Scavenger drifts more than 5 yards from the player it is automatically dismissed and re-summoned. Skipped while mounted or airborne.
 - **Persistent settings** — All preferences saved between sessions via `SavedVariables`.
@@ -58,7 +60,7 @@ A WoW 3.3.5a AddOn for **Project Ebonhold** that automates the loot-and-sell cyc
 
 `InteractUnit` is a Blizzard-UI-only protected function and cannot be called from any addon or macro. The addon works around this with an **on-screen vendor button**:
 
-1. The **Vendor** button appears on your screen automatically on login (coin icon with a gold border). Alt+Drag to move it wherever suits your HUD.
+1. The **Vendor** button is shown on login by default (coin icon with a gold border), and remembers whether you previously hid it from the settings window. Alt+Drag to move it wherever suits your HUD; Ctrl+Click toggles the settings window and still targets the Goblin Merchant.
 2. When the Goblin Merchant is summoned, click the **Vendor** button — this targets the NPC even during combat.
 3. Press your **Interact with Target** keybind (`Escape → Key Bindings → Targeting → Interact With Target`) to open the vendor window.
 4. Auto-repair and auto-sell fire instantly the moment `MERCHANT_SHOW` triggers.
@@ -72,28 +74,28 @@ The button can be shown or hidden at any time from the **Show/Hide Vendor Btn** 
 ## GUI Overview
 
 ```
-┌─────────────────────────────────────┐
-│       Ebonhold AutoLoot & Sell      │
-├─────────────────────────────────────┤
-│ Status: LOOTING   Free Slots: 12    │
-├─────────────────────────────────────┤
-│ [  Enable/Disable  ] [Force Sell Now] │
-├─────────────────────────────────────┤
-│ Click vendor button, then Interact  │
-│ key to sell          [Show Vendor Btn] │
-├─────────────────────────────────────┤
-│ SELL QUALITY                        │
-│ [x] Grey  [ ] White  [ ] Uncommon  │
-│ [ ] Rare  [ ] Epic                  │
-├─────────────────────────────────────┤
-│ ITEM WHITELIST                      │
-│ [Item Name Input         ] [  Add  ] │
-│ [Whitelist all "Tome of Echo:" in bags] │
-│ ┌─────────────────────────────────┐ │
-│ │ Hearthstone            [Remove] │ │
-│ │ Tome of Echo: Fire     [Remove] │ │
-│ └─────────────────────────────────┘ │
-└─────────────────────────────────────┘
+┌────────────────────────────────────────────────┐
+│            Ebonhold AutoLoot & Sell            │
+├────────────────────────────────────────────────┤
+│ Status: LOOTING Free Slots: 12   [ ] Fast Mode │
+├────────────────────────────────────────────────┤
+│    [ Enable/Disable ]     [Force Sell Now]     │
+├────────────────────────────────────────────────┤
+│ Click vendor button, then Interact             │
+│ key to sell                  [Show Vendor Btn] │
+├────────────────────────────────────────────────┤
+│ SELL QUALITY                                   │
+│ [x] Grey     [ ] White     [ ] Uncommon        │
+│ [ ] Rare     [ ] Epic                          │
+├────────────────────────────────────────────────┤
+│ ITEM WHITELIST                                 │
+│ [Item Name Input                   ] [  Add  ] │
+│ [Whitelist "Tome of Echo:" in bags] [Defaults] │
+│ ┌────────────────────────────────────────────┐ │
+│ │ Hearthstone                       [Remove] │ │
+│ │ Tome of Echo: Fi                  [Remove] │ │
+│ └────────────────────────────────────────────┘ │
+└────────────────────────────────────────────────┘
 ```
 
 *The on-screen Vendor button floats separately from this window. Alt+Drag to reposition it.*
@@ -104,7 +106,9 @@ The button can be shown or hidden at any time from the **Show/Hide Vendor Btn** 
 
 | Version | Notes |
 |---|---|
-| 2.8 | README updated to reflect all current features; arrow glyph fixed in vendor hint text. |
+| 2.10 | Added **Fast Mode** and a **Defaults** whitelist button. Refined Vendor button Ctrl+Click so it still targets the Goblin Merchant and also toggles settings via `PostClick`. Improved legacy blacklist-to-whitelist SavedVariables migration and sanitized invalid whitelist entries. |
+| 2.9 | Reduced batch size to 45 items and increased inter-batch delay to 1.0 s to prevent disconnects on large inventories (PR #1 by @zaxlofful). Added `FinishSelling` helper and guard for vendor closing mid-batch. Status bar now refreshes every bag-check tick. High-end release also available (80 items / 0.5 s). |
+| 2.8 | README updated to reflect all current features at the time; arrow glyph fixed in vendor hint text. |
 | 2.7 | Renamed all player-facing "blacklist" text to "whitelist". |
 | 2.6 | Added "Whitelist all Tome of Echo: in bags" one-click button. |
 | 2.5 | Batched selling: up to 80 items per pulse, 0.5 s delay between batches, single summary on completion. |
@@ -120,6 +124,14 @@ The button can be shown or hidden at any time from the **Show/Hide Vendor Btn** 
 | 1.2 | Companion stuck detection: auto-resummon if Greedy Scavenger > 5 yards away while not mounted. |
 | 1.1 | Case-insensitive companion name matching; in-combat vendor attempt with SecureAction button. |
 | 1.0 | Initial release — auto-loot/sell cycle, quality toggles, blacklist GUI. |
+
+---
+
+## Contributors
+
+| Contributor | Contribution |
+|---|---|
+| [zaxlofful](https://github.com/zaxlofful) (Zachary Laughlin) | PR #1 — reduced sell batch size and increased inter-batch delay to prevent disconnects on large inventories |
 
 ---
 

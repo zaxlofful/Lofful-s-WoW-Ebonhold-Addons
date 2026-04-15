@@ -1,5 +1,38 @@
 # Changelog — EbonholdAutoLoot
 
+## [2.10] - 2026-04-15
+
+> Cumulative release notes for all user-facing changes added after the latest merge from `Veronica-Vasilieva/EbonholdAutoLoot` (`5b5643e`).
+
+### Added
+- **Fast Mode** toggle in the main status row. When enabled, sell throughput increases by doubling `MAX_SELL_PER_PULSE` and halving `SELL_BATCH_DELAY`.
+- **Whitelist Defaults** button beside the Tome whitelist action. Adds a curated starter list of commonly kept items (potions, cloth, hearthstone, profession/tooling materials, etc.) while skipping items already in the whitelist.
+
+### Changed
+- On-screen **Vendor** button `Ctrl+Click` flow refined: it now still targets **Goblin Merchant** via the secure macro action and then opens/closes the settings window through a `PostClick` hook (secure click behavior preserved).
+- Bag polling/status refresh path optimized to reuse one free-slot calculation per tick and pass it through to `EAL_UpdateStatus()`, reducing duplicate bag scans during looting.
+- README and in-addon guidance updated to reflect the final secure vendor-button interaction flow and current whitelist tooling.
+
+### Fixed
+- SavedVariables migration now handles legacy profiles more safely: old `blacklist` entries are migrated into `whitelist` case-insensitively, invalid/non-string entries are sanitized, and the legacy key is cleared after migration.
+- Whitelist reliability improvements from recent bugfixes so protected items are consistently recognized and kept.
+
+---
+
+## [2.9] - 2026-04-15
+
+### Changed
+- `MAX_SELL_PER_PULSE` reduced from 80 → **45** items per batch to prevent disconnects on larger inventories (contributed by @zaxlofful, PR #1).
+- Inter-batch delay increased from 0.5 s → **1.0 s** (`SELL_BATCH_DELAY`) for the same reason.
+- Extracted `FinishSelling(totalSold, totalSkipped)` helper — deduplicates the summary print/status update that previously appeared in two branches of `SellItems`.
+- Added guard in the batch continuation callback: if `MerchantFrame` closes between the delay firing and the next sell pass, `FinishSelling` is called cleanly instead of attempting to sell against a closed vendor window.
+- `EAL_UpdateStatus()` now called on every bag-check tick so the free-slot counter stays current while looting.
+- `EAL_VendorBtn` no longer uses `SetScript("OnClick", ...)`, which was replacing the `SecureActionButtonTemplate` secure click handler. The button now keeps its secure `/target Goblin Merchant` action intact and opens settings from a `PostClick` hook.
+
+> **High-end hardware users:** A separate release `EbonholdAutoLoot-v2.9-highend` is available with the original `MAX_SELL_PER_PULSE = 80` / `SELL_BATCH_DELAY = 0.5 s` settings for machines that do not experience disconnects with the larger batch size.
+
+---
+
 ## [2.8] - 2026-04-09
 
 ### Changed
